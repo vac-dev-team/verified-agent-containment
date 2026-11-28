@@ -8,11 +8,14 @@ is the case's fingerprint, together with the values on both sides. One cause
 tends to leave the same fingerprint on every case it touches, so the groups,
 not the cases, are what to look at.
 
-A difference that is meant (a policy made finer on purpose, say) is listed in an
-expected-differences file with the reason, and does not fail the comparison.
-Every other group does.
+A difference that is meant (a policy made finer on purpose, say) is listed,
+with the reason, under [[expected]] in the waivers file, and does not fail the
+comparison. Every other group does. The waivers file is
+waivers/verified-agent-containment.toml in the organization's .github
+repository, which agents do not edit; nothing in this repository is read for
+waivers. Without --waivers, every group is new.
 
-usage: uv run tools/eval_diff.py BEFORE_DIR AFTER_DIR [--expected FILE] [--json OUT]
+usage: uv run tools/eval_diff.py BEFORE_DIR AFTER_DIR [--waivers FILE] [--json OUT]
 
 Exit 0 when every group is expected, 1 when any is not, 2 on bad input.
 """
@@ -74,11 +77,14 @@ def fingerprint(before, after):
 def expected_rules(path):
     if path is None:
         return []
-    rules = tomllib.loads(Path(path).read_text(encoding="utf-8")).get("expected", [])
+    try:
+        rules = tomllib.loads(Path(path).read_text(encoding="utf-8")).get("expected", [])
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        raise SystemExit(f"eval_diff: {path}: {error}")
     for rule in rules:
         missing = [k for k in ("stage", "before", "after", "reason") if k not in rule]
         if missing:
-            raise SystemExit(f"eval_diff: an expected difference in {path} has no {', '.join(missing)}")
+            raise SystemExit(f"eval_diff: an [[expected]] entry in {path} has no {', '.join(missing)}")
     return rules
 
 
@@ -119,12 +125,12 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("before", type=Path)
     parser.add_argument("after", type=Path)
-    parser.add_argument("--expected", type=Path, help="TOML file of expected differences")
+    parser.add_argument("--waivers", "--expected", dest="waivers", type=Path, help="the organization's waivers file")
     parser.add_argument("--json", type=Path, help="write the full report here")
     args = parser.parse_args(argv)
 
     before, after = load(args.before), load(args.after)
-    groups = compare(before, after, expected_rules(args.expected))
+    groups = compare(before, after, expected_rules(args.waivers))
     unexpected = [g for g in groups if g["expected"] is None]
     report = {
         "before": str(args.before), "after": str(args.after),

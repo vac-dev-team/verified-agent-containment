@@ -41,7 +41,6 @@ Each sandbox run takes the lock `/tmp/vac-lab.lock`. If a run waits for minutes,
 | `grants/v1/*.json` | The generated grants; do not edit by hand |
 | `run.py` | Starts the fixture servers, runs the cases, judges them |
 | `show_case.py` | Prints the raw evidence for one case, for a check by hand |
-| `expected-differences.toml` | Differences between two runs that are meant, each with its reason; read by `tools/eval_diff.py` |
 | `build_root.sh`, `root/` | The sandbox root and its pins |
 
 ## Outcomes
@@ -59,7 +58,7 @@ Each destination named by a benign user task gets its own fixture server and its
 ## Comparing two runs
 
 ```bash
-uv run tools/eval_diff.py evals/agentdojo/runs/2026-11-25-domain OUT --expected evals/agentdojo/expected-differences.toml
+uv run tools/eval_diff.py evals/agentdojo/runs/2026-11-25-domain OUT [--waivers WAIVERS.toml]
 ```
 
-It compares every case in pipeline order (the program started, the gate's answer to each request, the mode changes, the final mode, the outcome, AgentDojo's verdict) and names each case by the first stage that differs and the values on both sides. Cases with the same fingerprint are one group, and one cause usually makes one group. Each group prints one `--case` to rerun it alone. It fails on any group `expected-differences.toml` does not list. Comparing the two recorded runs gives 266 differing cases in 7 groups; the smallest is the false stop.
+It compares every case in pipeline order (the program started, the gate's answer to each request, the mode changes, the final mode, the outcome, AgentDojo's verdict) and names each case by the first stage that differs and the values on both sides. Cases with the same fingerprint are one group, and one cause usually makes one group. Each group prints one `--case` to rerun it alone. It fails on any group the waivers file does not list. The waivers are the owner's, in `waivers/verified-agent-containment.toml` in the organization's `.github` repository (`docs/verification.md`, Waivers). Comparing the two recorded runs gives 266 differing cases in 7 groups; the smallest is the false stop.
