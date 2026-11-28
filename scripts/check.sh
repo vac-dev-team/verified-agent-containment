@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Runs every check that needs neither root nor Lean, and writes what it measures
 # to target/verify/. Nothing under results/ is touched.
-# Needs cargo, bend, bun, node, java, uv and the TLA+ tools; scripts/factory.sh check
-# runs it in the image that has them all.
+# Needs cargo, bend, bun, node, java, uv, shellcheck, cargo-deny and the TLA+
+# tools; scripts/factory.sh check runs it in the image that has them all. A
+# missing tool stops it with exit 2 before any check runs, so none is skipped.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 jar="${TLA2TOOLS:-/opt/tla/tla2tools.jar}"
-for tool in cargo bend bun node java uv; do
+for tool in cargo bend bun node java uv shellcheck cargo-deny; do
   command -v "$tool" >/dev/null || { echo "check: $tool is not installed" >&2; exit 2; }
 done
 [ -f "$jar" ] || { echo "check: $jar not found; set TLA2TOOLS" >&2; exit 2; }
@@ -15,15 +16,8 @@ done
 out=target/verify
 mkdir -p "$out" target/generated
 
-# ShellCheck and cargo-deny's offline checks. Both tools are newer than the image
-# the organization's required check pins, so there, until that pin moves, the
-# lint is skipped with a warning; the supply-chain workflow runs it in the image
-# built from this checkout. scripts/factory.sh check builds that image too.
-if command -v shellcheck >/dev/null && command -v cargo-deny >/dev/null; then
-  scripts/lint.sh
-else
-  echo "check: WARNING: shellcheck or cargo-deny is not installed; scripts/lint.sh was skipped" >&2
-fi
+# ShellCheck and cargo-deny's offline checks.
+scripts/lint.sh
 
 uv run tools/invariants_check.py
 uv run tools/unwrap_check.py
