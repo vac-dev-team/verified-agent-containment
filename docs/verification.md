@@ -20,13 +20,17 @@ scripts/factory.sh kani       # scripts/kani.sh, the Kani proofs of admission, i
 
 `main` is squash-only with linear history. The required `check` workflow, kept in the organization's `.github` repository, runs `scripts/check.sh` and the Lean recheck on every pull request, each in its own pinned image.
 
+### Waivers
+
+Two checks can be waived, and only by the owner. The required check runs `main`'s copy of `tools/verifier_ratchet.py`, which refuses a pull request that removes a check, law, mutant, Kani harness, test or scenario. When a pull request adds an AgentDojo run folder, it also runs `main`'s `tools/eval_diff.py` against the run `scripts/outer-loop.sh` names as its baseline, which refuses any group of differences. A waiver is an entry in `waivers/verified-agent-containment.toml` in the organization's `.github` repository: `[[removed]]` (kind, name, reason) for the ratchet and `[[expected]]` (suite, stage, before, after, reason) for the comparison. Agents do not edit that repository, so no pull request can waive its own refusal. The nightly outer loop reads the same file.
+
 The claims in [`claims.toml`](../claims.toml) are frozen at tag `pre-factory`; see [`evidence-rules.md`](evidence-rules.md).
 
 ## The outer loop
 
 `scripts/check.sh` and the Kani proofs are the inner loop: they run on every push and take minutes at most. The `outer-loop` workflow runs once a night on `main` and takes hours. Each finding comes back to the inner loop as a case it reruns.
 
-1. **Eval.** Every AgentDojo case through the gate, with no model called, compared with the last committed run by `tools/eval_diff.py`. Differences are grouped by fingerprint, and one listed in `evals/agentdojo/expected-differences.toml` is meant.
+1. **Eval.** Every AgentDojo case through the gate, with no model called, compared with the last committed run by `tools/eval_diff.py`. Differences are grouped by fingerprint, and one waived in the organization's waivers file is meant.
 2. **Replay.** Every kernel step those cases took, replayed through the Bend and wasm kernels in the check image. The first case of each fingerprint goes to `new-cases.jsonl`.
 3. **Report.** The run's summary lists every fingerprint, and the run fails if any is new.
 

@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import tempfile
 import unittest
@@ -58,8 +60,30 @@ class EvalDiff(unittest.TestCase):
         with self.assertRaises(SystemExit):
             eval_diff.expected_rules(tmp)
 
-    def test_the_committed_expected_file_parses(self):
-        eval_diff.expected_rules(Path(__file__).resolve().parents[1] / "evals/agentdojo/expected-differences.toml")
+    def test_the_waivers_file_may_hold_other_tables(self):
+        tmp = Path(tempfile.mkdtemp()) / "waivers.toml"
+        tmp.write_text('[[removed]]\nkind = "law"\nname = "x"\nreason = "ratchet"\n'
+                       '[[expected]]\nstage = "*"\nbefore = "*"\nafter = "*"\nreason = "meant"\n')
+        [rule] = eval_diff.expected_rules(tmp)
+        self.assertEqual(rule["reason"], "meant")
+
+    def test_no_waivers_file_in_this_repository(self):
+        root = Path(__file__).resolve().parents[1]
+        for name in ("evals/agentdojo/expected-differences.toml", "ci/verifier-removals.toml", "waivers"):
+            self.assertFalse((root / name).exists(), f"{name}: waivers live in the organization's .github repository")
+
+    def test_the_old_flag_still_reads_the_waivers(self):
+        a, b = self.run_dirs([case("workspace.u0.i0")], [case("workspace.u0.i0", gate="refused", outcome="blocked")])
+        tmp = Path(tempfile.mkdtemp()) / "waivers.toml"
+        tmp.write_text('[[expected]]\nstage = "gate on *"\nbefore = "*"\nafter = "*"\nreason = "meant"\n')
+        rows = [json.dumps(case("workspace.u0.i0")), json.dumps(case("workspace.u0.i0", gate="refused", outcome="blocked"))]
+        dirs = Path(tempfile.mkdtemp())
+        for name, row in zip(("before", "after"), rows):
+            (dirs / name).mkdir()
+            (dirs / name / "cases.jsonl").write_text(row + "\n")
+        for flag in ("--waivers", "--expected"):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(eval_diff.main([str(dirs / "before"), str(dirs / "after"), flag, str(tmp)]), 0)
 
 
 if __name__ == "__main__":

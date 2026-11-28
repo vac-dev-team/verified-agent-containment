@@ -4,18 +4,24 @@
 Lists what does the verifying at two git revisions: the commands in
 scripts/check.sh, the laws, the kernel mutants, the Kani harnesses and their
 mutants, the Rust tests, the attack and live scenarios, the invariant cases and
-the tool tests. Anything at BASE that is gone at HEAD must be named in
-ci/verifier-removals.toml at HEAD, with a reason, or the check fails. Adding is
+the tool tests. Anything at BASE that is gone at HEAD must be named, with a
+reason, under [[removed]] in the waivers file, or the check fails. Adding is
 always fine. A renamed test counts as one removed and one added. A name in the
-removals file may be a glob, such as a whole deleted test file.
+waivers file may be a glob, such as a whole deleted test file.
+
+The waivers file is waivers/verified-agent-containment.toml in the
+organization's .github repository, next to the required check that runs this.
+Agents do not edit that repository, so a change cannot waive its own removal.
+Nothing in this repository is read for waivers. Without --waivers, no removal
+is waived.
 
 Run the copy from the base branch, not the one in the change under review, so a
-change cannot edit the rule that judges it:
+change cannot edit the rule that judges it. The required check does:
 
-    git show origin/main:tools/verifier_ratchet.py > /tmp/verifier_ratchet.py
-    python3 -I /tmp/verifier_ratchet.py origin/main HEAD
+    git show "$BASE:tools/verifier_ratchet.py" > "$RUNNER_TEMP/verifier_ratchet.py"
+    python3 -I "$RUNNER_TEMP/verifier_ratchet.py" "$BASE" HEAD --waivers ../org/waivers/verified-agent-containment.toml
 
-usage: verifier_ratchet.py BASE [HEAD] [--repo DIR]
+usage: verifier_ratchet.py BASE [HEAD] [--repo DIR] [--waivers FILE]
 Exit 0 when nothing was dropped unannounced, 1 when something was, 2 on bad input.
 """
 import argparse
@@ -25,8 +31,8 @@ import re
 import subprocess
 import sys
 import tomllib
+from pathlib import Path
 
-REMOVALS = "ci/verifier-removals.toml"
 CHECK_COMMAND = re.compile(r"^(uv |cargo |bun |node |bend |\(cd |tools/|scripts/|target/)")
 LAW = re.compile(r"^law (\w+):", re.M)
 TEST = re.compile(r"#\[test\]\s*(?:#\[[^\]]*\]\s*)*fn (\w+)")
@@ -90,18 +96,24 @@ def inventory(repo):
     return out
 
 
-def announced(repo):
-    entries = tomllib.loads(repo.read(REMOVALS) or "").get("removed", [])
+def announced(waivers):
+    """[(kind, name)] from the waivers file's [[removed]] table; [] without one."""
+    if waivers is None:
+        return []
+    try:
+        entries = tomllib.loads(Path(waivers).read_text(encoding="utf-8")).get("removed", [])
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        raise SystemExit(f"verifier_ratchet: {waivers}: {error}")
     for entry in entries:
         if not all(entry.get(k) for k in ("kind", "name", "reason")):
-            raise SystemExit(f"verifier_ratchet: every entry in {REMOVALS} needs kind, name and reason")
+            raise SystemExit(f"verifier_ratchet: every [[removed]] entry in {waivers} needs kind, name and reason")
     return [(e["kind"], e["name"]) for e in entries]
 
 
-def dropped(base, head):
-    """What BASE has and HEAD lacks, less what HEAD's removals file names. A name
+def dropped(base, head, waivers=None):
+    """What BASE has and HEAD lacks, less what the waivers file names. A name
     there may be a glob, so a deleted test file is one entry, not one per test."""
-    before, after, ok = inventory(base), inventory(head), announced(head)
+    before, after, ok = inventory(base), inventory(head), announced(waivers)
     return sorted((kind, name) for kind in before for name in before[kind] - after[kind]
                   if not any(kind == k and fnmatch.fnmatchcase(name, pattern) for k, pattern in ok))
 
@@ -111,10 +123,11 @@ def main(argv=None):
     parser.add_argument("base")
     parser.add_argument("head", nargs="?", default="HEAD")
     parser.add_argument("--repo", default=".")
+    parser.add_argument("--waivers", type=Path, help="the organization's waivers file")
     args = parser.parse_args(argv)
-    missing = dropped(Repo(args.repo, args.base), Repo(args.repo, args.head))
+    missing = dropped(Repo(args.repo, args.base), Repo(args.repo, args.head), args.waivers)
     for kind, name in missing:
-        print(f"verifier_ratchet: {kind} removed without an entry in {REMOVALS}: {name}")
+        print(f"verifier_ratchet: {kind} removed without a waiver: {name}")
     counts = {k: len(v) for k, v in inventory(Repo(args.repo, args.head)).items()}
     print(f"verifier_ratchet: {'REFUSED' if missing else 'ok'}; at {args.head}: " + ", ".join(f"{v} {k}" for k, v in counts.items()))
     return 1 if missing else 0

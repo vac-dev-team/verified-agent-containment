@@ -32,8 +32,12 @@ class Ratchet(unittest.TestCase):
         self.git("commit", "-q", "--allow-empty", "-m", "x")
         return self.git("rev-parse", "HEAD")
 
-    def dropped(self):
-        return vr.dropped(vr.Repo(str(self.dir), self.base), vr.Repo(str(self.dir), self.commit()))
+    def dropped(self, waivers=None):
+        path = None
+        if waivers is not None:
+            path = Path(tempfile.mkdtemp()) / "waivers.toml"
+            path.write_text(waivers)
+        return vr.dropped(vr.Repo(str(self.dir), self.base), vr.Repo(str(self.dir), self.commit()), path)
 
     def test_nothing_removed_passes(self):
         self.write({"formal/LAWS.bend": LAWS + "law clock_never_rewinds:\n  z\n"})
@@ -52,14 +56,28 @@ class Ratchet(unittest.TestCase):
         self.assertEqual(self.dropped(), [("check.sh command", "uv run tools/generate_proof.py")])
 
     def test_an_announced_removal_passes_and_a_glob_covers_a_file(self):
-        self.write({"crates/k/src/lib.rs": "", "ci/verifier-removals.toml":
-                    '[[removed]]\nkind = "rust test"\nname = "crates/k/src/lib.rs::*"\nreason = "the module moved"\n'})
-        self.assertEqual(self.dropped(), [])
+        self.write({"crates/k/src/lib.rs": ""})
+        self.assertEqual(self.dropped('[[removed]]\nkind = "rust test"\nname = "crates/k/src/lib.rs::*"\nreason = "the module moved"\n'), [])
 
     def test_a_removal_without_a_reason_is_refused(self):
-        self.write({"formal/LAWS.bend": "", "ci/verifier-removals.toml": '[[removed]]\nkind = "law"\nname = "*"\n'})
+        self.write({"formal/LAWS.bend": ""})
         with self.assertRaises(SystemExit):
-            self.dropped()
+            self.dropped('[[removed]]\nkind = "law"\nname = "*"\n')
+
+    def test_a_waiver_written_in_the_change_itself_is_ignored(self):
+        waiver = '[[removed]]\nkind = "law"\nname = "*"\nreason = "mine"\n'
+        self.write({"formal/LAWS.bend": "", "ci/verifier-removals.toml": waiver, "waivers/verified-agent-containment.toml": waiver})
+        self.assertEqual(self.dropped(), [("law", "fail_closed"), ("law", "tighten_only")])
+
+    def test_the_waivers_file_may_hold_other_tables(self):
+        self.write({"formal/LAWS.bend": "law fail_closed:\n  x\n"})
+        waivers = ('[[expected]]\nstage = "*"\nbefore = "*"\nafter = "*"\nreason = "eval"\n'
+                   '[[removed]]\nkind = "law"\nname = "tighten_only"\nreason = "merged into fail_closed"\n')
+        self.assertEqual(self.dropped(waivers), [])
+
+    def test_a_missing_waivers_file_is_bad_input(self):
+        with self.assertRaises(SystemExit):
+            vr.announced(Path(tempfile.mkdtemp()) / "missing.toml")
 
     def test_the_command_key_drops_flags_and_output(self):
         self.assertEqual(vr.command_key("bun tools/differential.mjs a b | tee results/d.json"), "bun tools/differential.mjs a b")

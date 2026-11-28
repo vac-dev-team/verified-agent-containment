@@ -20,6 +20,9 @@
 #   OUTER_OUT       where everything goes (default target/outer)
 #   OUTER_BASELINE  the committed run to compare with
 #   OUTER_EVAL_ARGS which cases (default --all; "--cases 2" for a quick look)
+#   OUTER_WAIVERS   the organization's waivers file
+#                   (waivers/verified-agent-containment.toml in its .github
+#                   repository); without it every AgentDojo group is new
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -58,7 +61,10 @@ with open(sys.argv[3], "w") as kept:
     kept.writelines(line for line in open(sys.argv[1]) if line.strip() and json.loads(line)["case"] in ran)
 PY
     fi
-    uv run tools/eval_diff.py "$before" "$out/agentdojo" --expected evals/agentdojo/expected-differences.toml \
+    waivers=()
+    if [ -n "${OUTER_WAIVERS:-}" ]; then waivers=(--waivers "$OUTER_WAIVERS")
+    else echo "outer-loop: OUTER_WAIVERS is not set, so no AgentDojo difference is waived" >&2; fi
+    uv run tools/eval_diff.py "$before" "$out/agentdojo" ${waivers[@]+"${waivers[@]}"} \
       --json "$out/eval-diff.json" > "$out/eval-diff.txt" || [ $? = 1 ]
     : > "$out/traces.jsonl"
     find "$out/agentdojo" -path '*/live/kernel.jsonl' -print0 | sort -z | while IFS= read -r -d '' trace; do
